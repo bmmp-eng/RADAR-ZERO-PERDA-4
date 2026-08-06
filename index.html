@@ -260,6 +260,7 @@
 
             if (dadosFiltrados.length === 0) {
                 corpoTabela.innerHTML = `<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">Nenhum produto encontrado.</td></tr>`;
+                console.log(`Teste OK: Filtro aplicado (busca="${termoBusca}", emb="${filtroEmb}", apenasCriticos=${apenasCriticos}) — 0 resultados`);
                 return;
             }
 
@@ -298,6 +299,7 @@
                 `;
                 corpoTabela.innerHTML += linha;
             });
+            console.log(`Teste OK: Filtro aplicado (busca="${termoBusca}", emb="${filtroEmb}", apenasCriticos=${apenasCriticos}) — ${dadosFiltrados.length} resultado(s)`);
         }
 
         // 4. Modal de Auditoria — funcional: libera reservas reais (Reserva/Empenho/Pedido) e recalcula saldo
@@ -324,12 +326,16 @@
                 });
             }
             document.getElementById('modalAuditoria').classList.remove('hidden');
+            console.log(`Teste OK: Modal de auditoria aberto — SKU ${sku}, ${item.reservas.length} reserva(s) bloqueando o saldo`);
         }
 
         function liberarSaldo(sku, idxReserva) {
             const item = dadosEstoqueLimpos.find(i => i.sku === sku);
             const reserva = item.reservas[idxReserva];
-            if (!confirm(`Confirmar liberação de ${reserva.qtd} un. — ${reserva.tipo} do SKU ${sku}?`)) return;
+            if (!confirm(`Confirmar liberação de ${reserva.qtd} un. — ${reserva.tipo} do SKU ${sku}?`)) {
+                console.log(`Teste OK: Liberação de saldo cancelada pelo usuário — SKU ${sku}`);
+                return;
+            }
 
             item.disponivel += reserva.qtd;
             item.reservas.splice(idxReserva, 1);
@@ -344,6 +350,8 @@
             recalcularKPIs();
             atualizarGrafico();
 
+            console.log(`Teste OK: Saldo liberado — SKU ${sku}, +${reserva.qtd} un. (${reserva.tipo}), novo disponível: ${item.disponivel}`);
+
             if (item.reservas.length === 0) {
                 fecharModal();
             } else {
@@ -353,10 +361,12 @@
 
         function fecharModal() {
             document.getElementById('modalAuditoria').classList.add('hidden');
+            console.log('Teste OK: Modal de auditoria fechado');
         }
 
         // 5. Exportação CSV real, respeitando busca + filtros ativos no momento do clique
         function exportarCSV() {
+            console.log('Teste OK: Botão "Exportar para Comercial (CSV)" clicado');
             const termoBusca = document.getElementById('buscaTexto').value.toLowerCase();
             const filtroEmb = document.getElementById('filtroEmb').value;
             const apenasCriticos = document.getElementById('filtroCritico').checked;
@@ -389,6 +399,7 @@
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
+            console.log(`Teste OK: CSV exportado — ${dadosFiltrados.length} linha(s), arquivo radar-zero-perda-export-${new Date().toISOString().slice(0,10)}.csv`);
         }
 
         // 6. Gráfico Disponível x Retido (Curva A) — Top 5, barras horizontais
@@ -498,6 +509,8 @@
 
         async function importarPlanilhaERP(file) {
             if (!file) return;
+            console.log(`Teste OK: Botão "Importar Planilha do ERP" clicado — arquivo selecionado: ${file.name}`);
+            prepararAudioAlerta(); // tem que ser aqui, antes de qualquer 'await', ou o navegador bloqueia o áudio
             const inputEl = document.getElementById('inputPlanilhaERP');
             const badgeStatus = document.getElementById('badgeStatusAnalise');
             const statusOriginal = badgeStatus.innerHTML;
@@ -609,8 +622,10 @@
 
                 badgeStatus.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Análise Concluída e Saneada';
                 badgeStatus.className = 'text-sm font-medium text-green-600 bg-green-100 px-3 py-1 rounded-full flex items-center';
+                console.log(`Teste OK: Planilha importada com sucesso — ${file.name}, ${dadosEstoqueLimpos.length} SKUs, ${novosCriticos.length} novo(s) crítico(s)`);
             } catch (erro) {
                 console.error(erro);
+                console.log(`Teste FALHOU: Importação rejeitada — ${erro.message}`);
                 alert(`Não foi possível importar a planilha:\n\n${erro.message}`);
                 badgeStatus.innerHTML = statusOriginal;
                 badgeStatus.className = 'text-sm font-medium text-green-600 bg-green-100 px-3 py-1 rounded-full flex items-center';
@@ -645,10 +660,32 @@
             });
         }
 
+        let audioCtxAlerta = null;
+
+        // Cria/retoma o AudioContext. Precisa ser chamado o mais cedo possível dentro
+        // do handler de clique/seleção de arquivo — se só for criado depois de vários
+        // "await", o navegador considera que perdeu o "gesto do usuário" e o áudio
+        // fica mudo (suspenso) sem lançar nenhum erro visível.
+        function prepararAudioAlerta() {
+            try {
+                if (!audioCtxAlerta) {
+                    audioCtxAlerta = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtxAlerta.state === 'suspended') {
+                    audioCtxAlerta.resume();
+                }
+            } catch (e) {
+                console.warn('Não foi possível preparar o áudio de alerta:', e);
+            }
+        }
+
         // Beep curto via Web Audio API — não depende de nenhum arquivo de áudio externo
         function tocarAlertaSonoro() {
             try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                if (!audioCtxAlerta) { prepararAudioAlerta(); }
+                const ctx = audioCtxAlerta;
+                if (!ctx) return;
+                if (ctx.state === 'suspended') { ctx.resume(); }
                 [880, 660].forEach((freq, i) => {
                     const osc = ctx.createOscillator();
                     const gain = ctx.createGain();
