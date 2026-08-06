@@ -10,6 +10,18 @@
 </head>
 <body class="bg-gray-50 flex h-screen font-sans text-slate-800 relative">
 
+    <!-- Alerta: novos SKUs críticos detectados após importação -->
+    <div id="toastAlertaCritico" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-[60] max-w-xl w-[90%]">
+        <div class="bg-red-600 text-white rounded-lg shadow-2xl px-5 py-4 flex items-start gap-3 animate-pulse-once">
+            <span class="text-2xl leading-none">🚨</span>
+            <div class="flex-1">
+                <p class="font-bold text-sm" id="toastCriticoTitulo">Novos SKUs críticos detectados</p>
+                <p class="text-xs text-red-100 mt-1" id="toastCriticoDetalhe"></p>
+            </div>
+            <button onclick="fecharToastCritico()" class="text-red-100 hover:text-white font-bold text-lg leading-none">&times;</button>
+        </div>
+    </div>
+
     <!-- Menu Lateral -->
     <aside class="w-64 bg-[#004797] text-white flex flex-col z-20 shadow-xl">
         <div class="h-24 flex flex-col items-center justify-center border-b border-[#003370] pt-2">
@@ -577,6 +589,9 @@
                     throw new Error('A planilha foi lida, mas nenhuma linha de produto válida foi encontrada.');
                 }
 
+                // Foto do estado crítico ANTES de trocar os dados (pra comparação do alerta)
+                const estadoAntesDaImportacao = snapshotCritico(dadosEstoqueLimpos);
+
                 // Só substitui os dados atuais depois que TUDO deu certo
                 dadosEstoqueBrutos = novosDados;
                 dadosEstoqueLimpos = dadosEstoqueBrutos.filter(item => item.fisico > 0 && item.fisico < 100000);
@@ -587,6 +602,10 @@
                 aplicarFiltros();
                 recalcularKPIs();
                 atualizarGrafico();
+
+                const novosCriticos = detectarNovosCriticos(estadoAntesDaImportacao, dadosEstoqueLimpos);
+                exibirAlertaCriticos(novosCriticos);
+                estadoCriticoAnterior = snapshotCritico(dadosEstoqueLimpos);
 
                 badgeStatus.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Análise Concluída e Saneada';
                 badgeStatus.className = 'text-sm font-medium text-green-600 bg-green-100 px-3 py-1 rounded-full flex items-center';
@@ -600,11 +619,92 @@
             }
         }
 
+        // ============================================================
+        // 8. ALERTA DE NOVOS SKUs CRÍTICOS (visual + sonoro)
+        // A cada importação de planilha, comparamos o estado "crítico" de cada SKU
+        // ANTES x DEPOIS. Um SKU "novo crítico" é aquele que virou ruptura ou risco
+        // de validade agora, mas não estava crítico na última leitura do dashboard.
+        // Isso avisa o usuário sobre pioras reais no estoque, sem precisar caçar
+        // manualmente linha por linha na tabela.
+        // ============================================================
+
+        let estadoCriticoAnterior = {};
+        let timeoutToastCritico = null;
+
+        function snapshotCritico(lista) {
+            const mapa = {};
+            lista.forEach(item => { mapa[item.sku] = { critico: item.critico, tipoCritico: item.tipoCritico }; });
+            return mapa;
+        }
+
+        function detectarNovosCriticos(estadoAntes, listaAtual) {
+            return listaAtual.filter(item => {
+                const antes = estadoAntes[item.sku];
+                const eraCritico = antes ? antes.critico : false;
+                return item.critico && !eraCritico;
+            });
+        }
+
+        // Beep curto via Web Audio API — não depende de nenhum arquivo de áudio externo
+        function tocarAlertaSonoro() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                [880, 660].forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.18);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.16);
+                    osc.connect(gain).connect(ctx.destination);
+                    osc.start(ctx.currentTime + i * 0.18);
+                    osc.stop(ctx.currentTime + i * 0.18 + 0.16);
+                });
+            } catch (e) {
+                console.warn('Não foi possível tocar o alerta sonoro:', e);
+            }
+        }
+
+        function exibirAlertaCriticos(novosCriticos) {
+            if (novosCriticos.length === 0) return;
+
+            const rupturas = novosCriticos.filter(i => i.tipoCritico === 'ruptura').length;
+            const validade = novosCriticos.filter(i => i.tipoCritico === 'validade').length;
+
+            const partes = [];
+            if (rupturas > 0) partes.push(`${rupturas} em ruptura`);
+            if (validade > 0) partes.push(`${validade} em risco de validade`);
+
+            const nomesExemplo = novosCriticos.slice(0, 4).map(i => i.sku).join(', ');
+            const resto = novosCriticos.length > 4 ? ` +${novosCriticos.length - 4}` : '';
+
+            document.getElementById('toastCriticoTitulo').innerText =
+                `${novosCriticos.length} novo(s) SKU(s) crítico(s) desde a última leitura`;
+            document.getElementById('toastCriticoDetalhe').innerText =
+                `${partes.join(' · ')} — ${nomesExemplo}${resto}`;
+
+            const toast = document.getElementById('toastAlertaCritico');
+            toast.classList.remove('hidden');
+            tocarAlertaSonoro();
+
+            if (timeoutToastCritico) clearTimeout(timeoutToastCritico);
+            timeoutToastCritico = setTimeout(fecharToastCritico, 12000);
+
+            console.log(`Teste OK: Alerta de novos críticos disparado — ${novosCriticos.length} SKU(s): ${novosCriticos.map(i => i.sku).join(', ')}`);
+        }
+
+        function fecharToastCritico() {
+            document.getElementById('toastAlertaCritico').classList.add('hidden');
+            if (timeoutToastCritico) { clearTimeout(timeoutToastCritico); timeoutToastCritico = null; }
+        }
+
         // Iniciar
         window.onload = function() {
             aplicarFiltros();
             recalcularKPIs();
             atualizarGrafico();
+            estadoCriticoAnterior = snapshotCritico(dadosEstoqueLimpos);
+            console.log('Teste OK: Dashboard carregado —', dadosEstoqueLimpos.length, 'SKUs, estado crítico inicial capturado.');
         };
     </script>
 </body>
