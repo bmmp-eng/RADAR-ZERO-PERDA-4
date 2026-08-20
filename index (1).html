@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar Zero Perda | Painel CD Recife</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-50 flex h-screen font-sans text-slate-800 relative">
+
+    <!-- Alerta: novos SKUs críticos detectados após importação -->
+    <div id="toastAlertaCritico" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-[60] max-w-xl w-[90%]">
+        <div class="bg-red-600 text-white rounded-lg shadow-2xl px-5 py-4 flex items-start gap-3 animate-pulse-once">
+            <span class="text-2xl leading-none">🚨</span>
+            <div class="flex-1">
+                <p class="font-bold text-sm" id="toastCriticoTitulo">Novos SKUs críticos detectados</p>
+                <p class="text-xs text-red-100 mt-1" id="toastCriticoDetalhe"></p>
+            </div>
+            <button onclick="fecharToastCritico()" class="text-red-100 hover:text-white font-bold text-lg leading-none">&times;</button>
+        </div>
+    </div>
+
+    <!-- Menu Lateral -->
+    <aside class="w-64 bg-[#004797] text-white flex flex-col z-20 shadow-xl">
+        <div class="h-24 flex flex-col items-center justify-center border-b border-[#003370] pt-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-[#fac212] mb-1 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2m0 14v2m9-9h-2M5 12H3" />
+            </svg>
+            <h1 class="text-xl font-bold tracking-wider text-white">RADAR <span class="text-[#fac212]">ZERO</span></h1>
+        </div>
+        <nav class="flex-1 px-4 py-6 space-y-2 text-sm font-medium">
+            <a href="#" class="block px-4 py-3 bg-[#fac212] text-[#004797] rounded-md shadow transition-colors font-bold">Visão Geral (Real)</a>
+            <a href="#" class="block px-4 py-3 hover:bg-[#003370] text-gray-200 hover:text-white rounded-md transition-colors flex justify-between items-center">
+                Alertas de Validade
+                <span id="badgeValidade" class="bg-yellow-500 text-white text-xs px-2 py-0.5 rounded-full">10</span>
+            </a>
+            <a href="#" class="block px-4 py-3 hover:bg-[#003370] text-gray-200 hover:text-white rounded-md transition-colors flex justify-between items-center">
+                Rupturas Ocultas
+                <span id="badgeRupturas" class="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">13</span>
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Área Central -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+
+        <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-8 z-10 shadow-sm">
+            <div>
+                <h2 class="text-xl font-semibold text-gray-700">Armazém 05 - CD Recife</h2>
+                <p class="text-xs text-gray-500" id="infoSincronizacao">Sincronizado: SALDO_ESTOQUE_ATUAL_ARM_05_CD-REC_28-07-26.xlsx · 165 SKUs</p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <input type="file" id="inputPlanilhaERP" accept=".xlsx,.xls" class="hidden" onchange="importarPlanilhaERP(this.files[0])">
+                <button onclick="document.getElementById('inputPlanilhaERP').click()" class="bg-white border border-[#004797] hover:bg-blue-50 text-[#004797] px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm flex items-center">
+                    <span class="mr-2">📤</span> Importar Planilha do ERP
+                </button>
+                <button onclick="exportarCSV()" class="bg-[#004797] hover:bg-[#003370] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm flex items-center">
+                    <span class="mr-2">📥</span> Exportar para Comercial (CSV)
+                </button>
+                <span class="text-sm font-medium text-green-600 bg-green-100 px-3 py-1 rounded-full flex items-center" id="badgeStatusAnalise">
+                    <span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Análise Concluída e Saneada
+                </span>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-y-auto p-8">
+            <!-- Cards de Resumo -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-lg shadow-sm border-l-4 border-red-500">
+                    <p class="text-sm text-gray-500 font-medium mb-1">Rupturas Ocultas</p>
+                    <p class="text-3xl font-bold text-gray-800"><span id="kpiRupturas">13</span> <span class="text-sm font-normal text-gray-500">SKUs</span></p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-sm border-l-4 border-[#fac212]">
+                    <p class="text-sm text-gray-500 font-medium mb-1">Risco de Validade</p>
+                    <p class="text-3xl font-bold text-gray-800"><span id="kpiValidade">10</span> <span class="text-sm font-normal text-gray-500">Lotes</span></p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-sm border-l-4 border-[#004797]">
+                    <p class="text-sm text-gray-500 font-medium mb-1">Volume Físico Armazenado</p>
+                    <p class="text-3xl font-bold text-gray-800"><span id="kpiVolume">3.664</span> <span class="text-sm font-normal text-gray-500">Unidades</span></p>
+                </div>
+                <div class="bg-white p-6 rounded-lg shadow-sm border-l-4 border-orange-500">
+                    <p class="text-sm text-gray-500 font-medium mb-1">Vencimento Mais Próximo</p>
+                    <p class="text-3xl font-bold text-gray-800"><span id="kpiDiasVencer">—</span> <span class="text-sm font-normal text-gray-500">dias</span></p>
+                    <p class="text-xs text-gray-400 mt-1" id="kpiSkuVencer"></p>
+                </div>
+            </div>
+
+            <!-- Gráfico Top 5 — largura total, logo acima da tabela, visível na primeira tela -->
+            <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 mb-8">
+                <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Disponível x Retido (Top 5 SKUs por Volume)</h3>
+                <div class="relative w-full h-52">
+                    <canvas id="graficoTopEstoque"></canvas>
+                </div>
+            </div>
+
+            <!-- Tabela Dinâmica -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                    <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wider">Monitoramento de Estoque</h3>
+                </div>
+
+                <!-- BARRA DE FILTROS E BUSCA -->
+                <div class="p-4 bg-gray-50 border-b border-gray-200 flex flex-wrap items-end gap-6">
+
+                    <!-- Busca por Texto -->
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Buscar Produto (PA ou Nome)</label>
+                        <input type="text" id="buscaTexto" onkeyup="aplicarFiltros()" placeholder="Ex: PA940 ou Granola..." class="block w-full rounded-md border-gray-300 border p-2 text-sm shadow-sm focus:border-[#004797] focus:ring focus:ring-[#004797] focus:ring-opacity-50">
+                    </div>
+
+                    <!-- Filtro de Embalagem -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Embalagem</label>
+                        <select id="filtroEmb" onchange="aplicarFiltros()" class="block w-32 rounded-md border-gray-300 border p-2 text-sm shadow-sm focus:border-[#004797] focus:ring focus:ring-[#004797] focus:ring-opacity-50">
+                            <option value="TODAS">Todas</option>
+                            <option value="CX">CX</option>
+                            <option value="MC">MC</option>
+                            <option value="CB">CB</option>
+                            <option value="DS">DS</option>
+                            <option value="UN">UN</option>
+                        </select>
+                    </div>
+
+                    <!-- Filtro de Criticidade -->
+                    <div class="flex items-center mb-2">
+                        <input id="filtroCritico" onchange="aplicarFiltros()" type="checkbox" class="h-5 w-5 text-[#004797] border-gray-300 rounded focus:ring-[#004797]">
+                        <label for="filtroCritico" class="ml-2 block text-sm font-semibold text-red-600">
+                            Apenas Críticos
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Corpo da Tabela Gerado via JS -->
+                <div class="overflow-x-auto flex-1 h-96">
+                    <table class="min-w-full divide-y divide-gray-200 relative">
+                        <thead class="bg-white sticky top-0 shadow-sm z-10">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU / Produto</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Emb.</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Físico</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Disponível</th>
+                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Dias p/ Vencer</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status / Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody id="corpoTabela" class="bg-white divide-y divide-gray-200">
+                            <!-- As linhas serão injetadas aqui pelo JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal de Auditoria -->
+    <div id="modalAuditoria" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-[#004797]" id="modalTitulo">Detalhes da Reserva</h3>
+                <button onclick="fecharModal()" class="text-gray-400 hover:text-red-500 font-bold text-xl">&times;</button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">Existem unidades físicas bloqueadas por pedidos antigos. Avalie a liberação.</p>
+            <div class="border rounded-lg overflow-hidden mb-6">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-gray-500 font-semibold">Origem do Bloqueio</th>
+                            <th class="px-4 py-2 text-center text-gray-500 font-semibold">Qtd Travada</th>
+                            <th class="px-4 py-2 text-center text-gray-500 font-semibold">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="corpoModal" class="divide-y divide-gray-200 bg-white"></tbody>
+                </table>
+            </div>
+            <div class="flex justify-end space-x-3">
+                <button onclick="fecharModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded font-semibold transition">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts de Interação -->
+    <script>
+        // ============================================================
+        // 1. DADOS REAIS — importados de SALDO_ESTOQUE_ATUAL_ARM_05_CD-REC_28-07-26.xlsx
+        // Fonte: aba "1-ESTOQUE" (saldo/reservas por SKU) + aba "2-LOTES" (validade por lote)
+        // "Risco de Validade" = SKU cujo lote mais próximo vence em até 95 dias
+        // ============================================================
+        let dadosEstoqueBrutos = [{"sku": "PA236", "nome": "ACUCAR DE COCO 200G - CX 6 UNID", "emb": "MC", "fisico": 1, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": null, "validadeProxima": null, "reservas": [{"pedido": "RESERVA-PA236", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA942", "nome": "ACUCAR DE COCO MINHA TIA 100G CX 08 UND", "emb": "CX", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 311, "validadeProxima": "04/06/2027", "reservas": []}, {"sku": "PA926", "nome": "ACUCAR DEMERARA MINHA TIA 400G CX 20 UND", "emb": "CX", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 297, "validadeProxima": "21/05/2027", "reservas": []}, {"sku": "PA271", "nome": "ACUCAR MASCAVO 400G CX 10 UND", "emb": "MC", "fisico": 10, "disponivel": 10, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 112, "validadeProxima": "17/11/2026", "reservas": []}, {"sku": "PA272", "nome": "ACUCAR MASCAVO 400G CX 20 UND", "emb": "CX", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 298, "validadeProxima": "22/05/2027", "reservas": []}, {"sku": "PA881", "nome": "ACUCAR MASCAVO MINHA TIA 400G CX 10 UND", "emb": "MC", "fisico": 4, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 255, "validadeProxima": "09/04/2027", "reservas": []}, {"sku": "PA346", "nome": "AVEIA EM FLOCOS FINOS 170G CX 14 UND", "emb": "MC", "fisico": 1, "disponivel": 1, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 91, "validadeProxima": "27/10/2026", "reservas": []}, {"sku": "PA894", "nome": "AVEIA EM FLOCOS FINOS MINHA TIA 170G CX 14 UND", "emb": "MC", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 147, "validadeProxima": "22/12/2026", "reservas": []}, {"sku": "PA892", "nome": "AVEIA EM FLOCOS FINOS SEM GLUTEN MINHA TIA 170G CX 14 UND", "emb": "CX", "fisico": 4, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 228, "validadeProxima": "13/03/2027", "reservas": []}, {"sku": "PA944", "nome": "AVEIA EM FLOCOS MINHA TIA 170G CX 14 UND", "emb": "MC", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 140, "validadeProxima": "15/12/2026", "reservas": []}, {"sku": "PA737", "nome": "BANANA GO CASTANHA DO PARA DISPLAY COM 15 UND DE 22G", "emb": "DS", "fisico": 90, "disponivel": 56, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 211, "validadeProxima": "24/02/2027", "reservas": [{"pedido": "RESERVA-PA737", "qtd": 29, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA737", "qtd": 5, "tipo": "Pedido"}]}, {"sku": "PA743", "nome": "BANANA GO NIBS DE CACAU CX COM 6 UND DE DISPLAY DE 330G", "emb": "CX", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 219, "validadeProxima": "04/03/2027", "reservas": []}, {"sku": "PA742", "nome": "BANANA GO NIBS DE CACAU DISPLAY COM 15 UND DE 22G", "emb": "DS", "fisico": 86, "disponivel": 42, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 211, "validadeProxima": "24/02/2027", "reservas": [{"pedido": "RESERVA-PA742", "qtd": 39, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA742", "qtd": 5, "tipo": "Pedido"}]}, {"sku": "PA732", "nome": "BANANA GO TRADICIONAL DISPLAY COM 15 UND DE 22G", "emb": "DS", "fisico": 126, "disponivel": 62, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 201, "validadeProxima": "14/02/2027", "reservas": [{"pedido": "RESERVA-PA732", "qtd": 38, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA732", "qtd": 26, "tipo": "Pedido"}]}, {"sku": "PA976", "nome": "BARRA CEREAL ABACAXI C/ CAST CAJU TIA SONIA DS 24X20G LIGHT", "emb": "DS", "fisico": 25, "disponivel": 22, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 131, "validadeProxima": "06/12/2026", "reservas": [{"pedido": "RESERVA-PA976", "qtd": 3, "tipo": "Reserva"}]}, {"sku": "PA026", "nome": "BARRA DE CEREAIS TIA SONIA DISPLAY 480G C/ 24UND COCO", "emb": "DS", "fisico": 36, "disponivel": 32, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 133, "validadeProxima": "08/12/2026", "reservas": [{"pedido": "RESERVA-PA026", "qtd": 4, "tipo": "Reserva"}]}, {"sku": "PA027", "nome": "BARRA DE CEREAIS TIA SONIA DISPLAY 480G C/ 24UND MIX", "emb": "DS", "fisico": 2, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 139, "validadeProxima": "14/12/2026", "reservas": [{"pedido": "RESERVA-PA027", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA062", "nome": "BARRA DE CEREAIS TIA SONIA DISPLAY 480G MIX CX 6 DISP", "emb": "CX", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 138, "validadeProxima": "13/12/2026", "reservas": []}, {"sku": "PA028", "nome": "BARRA DE CEREAIS TIA SONIA DISPLAY 600G C/ 24UND BANANA", "emb": "DS", "fisico": 45, "disponivel": 41, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 123, "validadeProxima": "28/11/2026", "reservas": [{"pedido": "RESERVA-PA028", "qtd": 4, "tipo": "Reserva"}]}, {"sku": "PA538", "nome": "BARRA NUTS ABACAXI COM CASTANHA DISPLAY 15X22G", "emb": "DS", "fisico": 55, "disponivel": 38, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 133, "validadeProxima": "08/12/2026", "reservas": [{"pedido": "RESERVA-PA538", "qtd": 16, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA538", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA528", "nome": "BARRA NUTS MIX DE CASTANHA COM FRUTAS DISPLAY 15X22G", "emb": "DS", "fisico": 80, "disponivel": 66, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 132, "validadeProxima": "07/12/2026", "reservas": [{"pedido": "RESERVA-PA528", "qtd": 4, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA528", "qtd": 10, "tipo": "Pedido"}]}, {"sku": "PA533", "nome": "BARRA NUTS TAMARA E SEMENTES DISPLAY 15X22G", "emb": "DS", "fisico": 26, "disponivel": 13, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 139, "validadeProxima": "14/12/2026", "reservas": [{"pedido": "RESERVA-PA533", "qtd": 12, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA533", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA934", "nome": "CACAU EM PO MINHA TIA 100G CX 08 UND", "emb": "CX", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 220, "validadeProxima": "05/03/2027", "reservas": []}, {"sku": "RV0071", "nome": "CAFE COMUNIDADE CLASSICO MOIDO 6X250G", "emb": "MC", "fisico": 4, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 312, "validadeProxima": "05/06/2027", "reservas": []}, {"sku": "RV0072", "nome": "CAFE COMUNIDADE FORTE E INTENSO MOIDO 6X250G", "emb": "MC", "fisico": 5, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 287, "validadeProxima": "11/05/2027", "reservas": []}, {"sku": "PA921", "nome": "CASTANHA-DE-CAJU TORRADA E SALGADA  MINHA TIA 80G CX 08 UND", "emb": "CX", "fisico": 9, "disponivel": 8, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 131, "validadeProxima": "06/12/2026", "reservas": [{"pedido": "RESERVA-PA921", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA907", "nome": "COOKIES CHIPS CARAMELO COM FLOR DE SAL TIA SONIA 80G CX 8 UN", "emb": "CX", "fisico": 3, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 147, "validadeProxima": "22/12/2026", "reservas": [{"pedido": "RESERVA-PA907", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA907", "qtd": 2, "tipo": "Pedido"}]}, {"sku": "PA908", "nome": "COOKIES CHIPS CHURROS COM DOCE DE LEITE TIA SONIA 80G", "emb": "UN", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 109, "validadeProxima": "14/11/2026", "reservas": []}, {"sku": "PA909", "nome": "COOKIES CHIPS CHURROS COM DOCE DE LEITE TIA SONIA 80G CX 08", "emb": "CX", "fisico": 11, "disponivel": 7, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 158, "validadeProxima": "02/01/2027", "reservas": [{"pedido": "RESERVA-PA909", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA909", "qtd": 3, "tipo": "Pedido"}]}, {"sku": "PA819", "nome": "COOKIES GOTAS DE CHOCOLATE TIA SONIA 100G CX 08 UND", "emb": "MC", "fisico": 5, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 134, "validadeProxima": "09/12/2026", "reservas": [{"pedido": "RESERVA-PA819", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA582", "nome": "COOKIES TIA SONIA CASTANHA DO PARA 120G CX 08 UND", "emb": "MC", "fisico": 3, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 96, "validadeProxima": "01/11/2026", "reservas": [{"pedido": "RESERVA-PA582", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA866", "nome": "COOKIES TIA SONIA GRANOLA 120G CX 08 UND", "emb": "MC", "fisico": 3, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 134, "validadeProxima": "09/12/2026", "reservas": [{"pedido": "RESERVA-PA866", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA229", "nome": "COQUINHO CROCANTE 120G CX 08 UNID", "emb": "MC", "fisico": 9, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 133, "validadeProxima": "08/12/2026", "reservas": [{"pedido": "RESERVA-PA229", "qtd": 9, "tipo": "Reserva"}]}, {"sku": "PA938", "nome": "CURCUMA EM PO MINHA TIA 80G CX 08 UND", "emb": "CX", "fisico": 2, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 308, "validadeProxima": "01/06/2027", "reservas": [{"pedido": "RESERVA-PA938", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA018", "nome": "DISPLAY TIA SONIA 30G COM 24 UNID CHOCOLATE", "emb": "DS", "fisico": 4, "disponivel": -6, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 159, "validadeProxima": "03/01/2027", "reservas": [{"pedido": "PEDIDO-PA018", "qtd": 10, "tipo": "Pedido"}]}, {"sku": "PA042", "nome": "DISPLAY TIA SONIA 30G TRADICIONAL 24 UN", "emb": "DS", "fisico": 105, "disponivel": 59, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 170, "validadeProxima": "14/01/2027", "reservas": [{"pedido": "RESERVA-PA042", "qtd": 45, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA042", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA282", "nome": "EXTRATO DE SOJA 200G", "emb": "UN", "fisico": 8, "disponivel": 8, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 70, "validadeProxima": "06/10/2026", "reservas": []}, {"sku": "PA283", "nome": "EXTRATO DE SOJA 200G CX 08 UND", "emb": "MC", "fisico": 16, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 155, "validadeProxima": "30/12/2026", "reservas": [{"pedido": "RESERVA-PA283", "qtd": 13, "tipo": "Reserva"}]}, {"sku": "PA284", "nome": "EXTRATO DE SOJA 200G CX 15 UND", "emb": "CX", "fisico": 13, "disponivel": 11, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 124, "validadeProxima": "29/11/2026", "reservas": [{"pedido": "RESERVA-PA284", "qtd": 2, "tipo": "Reserva"}]}, {"sku": "PA037", "nome": "FARINHA DE LINHACA DOURADA 200G", "emb": "UN", "fisico": 21, "disponivel": 21, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 101, "validadeProxima": "06/11/2026", "reservas": []}, {"sku": "PA422", "nome": "FARINHA DE LINHACA DOURADA 200G  CX 08 UND", "emb": "CB", "fisico": 1, "disponivel": -1, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 284, "validadeProxima": "08/05/2027", "reservas": [{"pedido": "RESERVA-PA422", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA422", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA179", "nome": "FARINHA DE LINHACA DOURADA 200G CX CX 15 UNID", "emb": "MC", "fisico": 8, "disponivel": 8, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 284, "validadeProxima": "08/05/2027", "reservas": []}, {"sku": "PA075", "nome": "FARINHA DE LINHACA DOURADA 200G CX CX 30 UNID", "emb": "CX", "fisico": 4, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 284, "validadeProxima": "08/05/2027", "reservas": []}, {"sku": "PA883", "nome": "FARINHA DE LINHACA DOURADA MINHA TIA 200G", "emb": "UN", "fisico": 24, "disponivel": 23, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 298, "validadeProxima": "22/05/2027", "reservas": [{"pedido": "RESERVA-PA883", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA884", "nome": "FARINHA DE LINHACA DOURADA MINHA TIA 200G CX 08 UND", "emb": "CB", "fisico": 23, "disponivel": 21, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 333, "validadeProxima": "26/06/2027", "reservas": [{"pedido": "RESERVA-PA884", "qtd": 2, "tipo": "Reserva"}]}, {"sku": "PA886", "nome": "FARINHA DE LINHACA DOURADA MINHA TIA 200G CX 30 UND", "emb": "CX", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 305, "validadeProxima": "29/05/2027", "reservas": []}, {"sku": "PA910", "nome": "FARINHA DE LINHACA MARROM MINHA TIA 200G", "emb": "UN", "fisico": 13, "disponivel": 13, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 130, "validadeProxima": "05/12/2026", "reservas": []}, {"sku": "PA911", "nome": "FARINHA DE LINHACA MARROM MINHA TIA 200G CX 08 UND", "emb": "CB", "fisico": 13, "disponivel": 10, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 298, "validadeProxima": "22/05/2027", "reservas": [{"pedido": "RESERVA-PA911", "qtd": 3, "tipo": "Reserva"}]}, {"sku": "PA913", "nome": "FARINHA DE LINHACA MARROM MINHA TIA 200G CX 30 UND", "emb": "CX", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 305, "validadeProxima": "29/05/2027", "reservas": []}, {"sku": "PA511", "nome": "FRUIT BAR BANANA ABACAXI CAST BRASIL 18G DSP 10X18G", "emb": "DS", "fisico": 6, "disponivel": 6, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 104, "validadeProxima": "09/11/2026", "reservas": []}, {"sku": "PA834", "nome": "GEMADA LATA TIA SONIA 300G CX 06 UND", "emb": "CX", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 147, "validadeProxima": "22/12/2026", "reservas": []}, {"sku": "PA948", "nome": "GERGELIM BRANCO COM PELICULA MINHA TIA 150G CX 12 UND", "emb": "MC", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 139, "validadeProxima": "14/12/2026", "reservas": []}, {"sku": "PA672", "nome": "GRANOLA CASTANHA-DO-PARA 800G CX 8 UND", "emb": "CX", "fisico": 5, "disponivel": 1, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 75, "validadeProxima": "11/10/2026", "reservas": [{"pedido": "RESERVA-PA672", "qtd": 2, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA672", "qtd": 2, "tipo": "Pedido"}]}, {"sku": "PA969", "nome": "GRANOLA FLORESTA NEGRA TIA SONIA 200G", "emb": "UN", "fisico": 5, "disponivel": 5, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 88, "validadeProxima": "24/10/2026", "reservas": []}, {"sku": "PA828", "nome": "GRANOLA FRANCESA TIA SONIA 200G", "emb": "UN", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 151, "validadeProxima": "26/12/2026", "reservas": []}, {"sku": "PA829", "nome": "GRANOLA FRANCESA TIA SONIA 200G CX 08 UND", "emb": "CX", "fisico": 12, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 151, "validadeProxima": "26/12/2026", "reservas": [{"pedido": "RESERVA-PA829", "qtd": 7, "tipo": "Reserva"}]}, {"sku": "PA444", "nome": "GRANOLA LINHA PROFISSIONAL 1,5 KG", "emb": "UN", "fisico": 5, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 118, "validadeProxima": "23/11/2026", "reservas": []}, {"sku": "PA445", "nome": "GRANOLA LINHA PROFISSIONAL 1,5 KG CX 08 UND", "emb": "CX", "fisico": 5, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 118, "validadeProxima": "23/11/2026", "reservas": []}, {"sku": "PA447", "nome": "GRANOLA LINHA PROFISSIONAL 4 KG CX 04 UND", "emb": "CX", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 117, "validadeProxima": "22/11/2026", "reservas": []}, {"sku": "PA338", "nome": "GRANOLA LOW CARB 180G", "emb": "UN", "fisico": 4, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 138, "validadeProxima": "13/12/2026", "reservas": []}, {"sku": "PA339", "nome": "GRANOLA LOW CARB 180G CX 15 UND", "emb": "CX", "fisico": 9, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 138, "validadeProxima": "13/12/2026", "reservas": [{"pedido": "RESERVA-PA339", "qtd": 7, "tipo": "Reserva"}]}, {"sku": "PA340", "nome": "GRANOLA LOW CARB 180G CX 8 UND", "emb": "MC", "fisico": 17, "disponivel": 17, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 151, "validadeProxima": "26/12/2026", "reservas": []}, {"sku": "PA830", "nome": "GRANOLA NORDESTINA TIA SONIA 200G", "emb": "UN", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 152, "validadeProxima": "27/12/2026", "reservas": []}, {"sku": "PA831", "nome": "GRANOLA NORDESTINA TIA SONIA 200G CX 08 UND", "emb": "CX", "fisico": 13, "disponivel": 6, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 152, "validadeProxima": "27/12/2026", "reservas": [{"pedido": "RESERVA-PA831", "qtd": 7, "tipo": "Reserva"}]}, {"sku": "PA310", "nome": "GRANOLA ORGANICA TIA SONIA POTE 450G CX 08 UND", "emb": "CX", "fisico": 4, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 124, "validadeProxima": "29/11/2026", "reservas": [{"pedido": "PEDIDO-PA310", "qtd": 4, "tipo": "Pedido"}]}, {"sku": "PA806", "nome": "GRANOLA PACOCA TIA SONIA 120G", "emb": "UN", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 130, "validadeProxima": "05/12/2026", "reservas": []}, {"sku": "PA807", "nome": "GRANOLA PACOCA TIA SONIA 120G CX 20 UND", "emb": "MC", "fisico": 16, "disponivel": 12, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 179, "validadeProxima": "23/01/2027", "reservas": [{"pedido": "RESERVA-PA807", "qtd": 4, "tipo": "Reserva"}]}, {"sku": "PA847", "nome": "GRANOLA PIPOCA TIA SONIA 120G CX 10 UND", "emb": "MC", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 180, "validadeProxima": "24/01/2027", "reservas": []}, {"sku": "PA804", "nome": "GRANOLA PIPOCA TIA SONIA 120G CX 20 UND", "emb": "MC", "fisico": 15, "disponivel": 11, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 201, "validadeProxima": "14/02/2027", "reservas": [{"pedido": "RESERVA-PA804", "qtd": 4, "tipo": "Reserva"}]}, {"sku": "PA314", "nome": "GRANOLA PREMIUM TIA SONIA POTE 410G", "emb": "UN", "fisico": 7, "disponivel": 7, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 106, "validadeProxima": "11/11/2026", "reservas": []}, {"sku": "PA315", "nome": "GRANOLA PREMIUM TIA SONIA POTE 410G CX 08 UND", "emb": "CX", "fisico": 3, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 106, "validadeProxima": "11/11/2026", "reservas": [{"pedido": "PEDIDO-PA315", "qtd": 2, "tipo": "Pedido"}]}, {"sku": "PA320", "nome": "GRANOLA SEM GLUTEN TIA SONIA POTE 400G CX 08 UND", "emb": "CX", "fisico": 4, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 103, "validadeProxima": "08/11/2026", "reservas": [{"pedido": "PEDIDO-PA320", "qtd": 3, "tipo": "Pedido"}]}, {"sku": "PA971", "nome": "GRANOLA TAMARA DOURADA TIA SONIA 200G", "emb": "UN", "fisico": 1, "disponivel": 1, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 88, "validadeProxima": "24/10/2026", "reservas": []}, {"sku": "PA081", "nome": "GRANOLA TIA SONIA 1KG SEM PASSAS", "emb": "UN", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 165, "validadeProxima": "09/01/2027", "reservas": []}, {"sku": "PA082", "nome": "GRANOLA TIA SONIA 1KG SEM PASSAS CX 08 UNID", "emb": "CX", "fisico": 88, "disponivel": 83, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 165, "validadeProxima": "09/01/2027", "reservas": [{"pedido": "RESERVA-PA082", "qtd": 5, "tipo": "Reserva"}]}, {"sku": "PA285", "nome": "GRANOLA TIA SONIA 200G", "emb": "UN", "fisico": 8, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 226, "validadeProxima": "11/03/2027", "reservas": [{"pedido": "RESERVA-PA285", "qtd": 6, "tipo": "Reserva"}]}, {"sku": "PA286", "nome": "GRANOLA TIA SONIA 200G CX 15 UND", "emb": "MC", "fisico": 282, "disponivel": 266, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 171, "validadeProxima": "15/01/2027", "reservas": [{"pedido": "RESERVA-PA286", "qtd": 15, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA286", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA287", "nome": "GRANOLA TIA SONIA 200G CX 30 UND", "emb": "CX", "fisico": 434, "disponivel": 360, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 179, "validadeProxima": "23/01/2027", "reservas": [{"pedido": "RESERVA-PA287", "qtd": 58, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA287", "qtd": 16, "tipo": "Pedido"}]}, {"sku": "PA009", "nome": "GRANOLA TIA SONIA 30G TRADICIONAL CX 100 UNID", "emb": "CX", "fisico": 6, "disponivel": 6, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 191, "validadeProxima": "04/02/2027", "reservas": []}, {"sku": "PA013", "nome": "GRANOLA TIA SONIA 30G TRADICIONAL CX 500 UNID", "emb": "CX", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 192, "validadeProxima": "05/02/2027", "reservas": []}, {"sku": "PA218", "nome": "GRANOLA TIA SONIA 30G TRADICIONAL SEM PASSAS CX 100 UND", "emb": "CX", "fisico": 105, "disponivel": 105, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 179, "validadeProxima": "23/01/2027", "reservas": []}, {"sku": "PA217", "nome": "GRANOLA TIA SONIA 30G TRADICIONAL SEM PASSAS CX 500 UND", "emb": "CX", "fisico": 77, "disponivel": 62, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 199, "validadeProxima": "12/02/2027", "reservas": [{"pedido": "RESERVA-PA217", "qtd": 6, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA217", "qtd": 9, "tipo": "Pedido"}]}, {"sku": "PA434", "nome": "GRANOLA TIA SONIA 400G CX 08UND", "emb": "MC", "fisico": 23, "disponivel": 14, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 185, "validadeProxima": "29/01/2027", "reservas": [{"pedido": "RESERVA-PA434", "qtd": 9, "tipo": "Reserva"}]}, {"sku": "PA294", "nome": "GRANOLA TIA SONIA 400G CX 15UND", "emb": "CX", "fisico": 215, "disponivel": 189, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 171, "validadeProxima": "15/01/2027", "reservas": [{"pedido": "RESERVA-PA294", "qtd": 16, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA294", "qtd": 10, "tipo": "Pedido"}]}, {"sku": "PA002", "nome": "GRANOLA TIA SONIA CASTANHA DO PARA 200G", "emb": "UN", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 193, "validadeProxima": "06/02/2027", "reservas": []}, {"sku": "PA417", "nome": "GRANOLA TIA SONIA CASTANHA DO PARA 200G CX 08 UND", "emb": "CB", "fisico": 34, "disponivel": 23, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 193, "validadeProxima": "06/02/2027", "reservas": [{"pedido": "RESERVA-PA417", "qtd": 11, "tipo": "Reserva"}]}, {"sku": "PA210", "nome": "GRANOLA TIA SONIA CASTANHA DO PARA 200G CX 15 UND", "emb": "MC", "fisico": 33, "disponivel": 25, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 194, "validadeProxima": "07/02/2027", "reservas": [{"pedido": "RESERVA-PA210", "qtd": 8, "tipo": "Reserva"}]}, {"sku": "PA051", "nome": "GRANOLA TIA SONIA CASTANHA DO PARA 200G CX 30 UND", "emb": "CX", "fisico": 101, "disponivel": 66, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 163, "validadeProxima": "07/01/2027", "reservas": [{"pedido": "RESERVA-PA051", "qtd": 35, "tipo": "Reserva"}]}, {"sku": "PA001", "nome": "GRANOLA TIA SONIA CHOCOLATE 200G", "emb": "UN", "fisico": 19, "disponivel": 19, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 164, "validadeProxima": "08/01/2027", "reservas": []}, {"sku": "PA209", "nome": "GRANOLA TIA SONIA CHOCOLATE 200G  CX 15 UND", "emb": "MC", "fisico": 3, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 191, "validadeProxima": "04/02/2027", "reservas": [{"pedido": "RESERVA-PA209", "qtd": 3, "tipo": "Reserva"}]}, {"sku": "PA416", "nome": "GRANOLA TIA SONIA CHOCOLATE 200G CX 08 UND", "emb": "CB", "fisico": 12, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 186, "validadeProxima": "30/01/2027", "reservas": [{"pedido": "RESERVA-PA416", "qtd": 5, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA416", "qtd": 3, "tipo": "Pedido"}]}, {"sku": "PA050", "nome": "GRANOLA TIA SONIA CHOCOLATE 200G CX 30 UND", "emb": "CX", "fisico": 22, "disponivel": 7, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 186, "validadeProxima": "30/01/2027", "reservas": [{"pedido": "RESERVA-PA050", "qtd": 15, "tipo": "Reserva"}]}, {"sku": "PA003", "nome": "GRANOLA TIA SONIA LIGHT 200G", "emb": "UN", "fisico": 14, "disponivel": 14, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 138, "validadeProxima": "13/12/2026", "reservas": []}, {"sku": "PA418", "nome": "GRANOLA TIA SONIA LIGHT 200G CX 08 UND", "emb": "CB", "fisico": 4, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 201, "validadeProxima": "14/02/2027", "reservas": [{"pedido": "RESERVA-PA418", "qtd": 4, "tipo": "Reserva"}]}, {"sku": "PA211", "nome": "GRANOLA TIA SONIA LIGHT 200G CX 15 UND", "emb": "MC", "fisico": 13, "disponivel": 13, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 201, "validadeProxima": "14/02/2027", "reservas": []}, {"sku": "PA053", "nome": "GRANOLA TIA SONIA LIGHT 200G CX 30 UND", "emb": "CX", "fisico": 68, "disponivel": 68, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 138, "validadeProxima": "13/12/2026", "reservas": []}, {"sku": "PA306", "nome": "GRANOLA TIA SONIA ORGANICA 200G", "emb": "UN", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 142, "validadeProxima": "17/12/2026", "reservas": []}, {"sku": "PA409", "nome": "GRANOLA TIA SONIA ORGANICA 200G CX 08 UND", "emb": "CB", "fisico": 15, "disponivel": 7, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 199, "validadeProxima": "12/02/2027", "reservas": [{"pedido": "RESERVA-PA409", "qtd": 8, "tipo": "Reserva"}]}, {"sku": "PA307", "nome": "GRANOLA TIA SONIA ORGANICA 200G CX 30 UND", "emb": "CX", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 199, "validadeProxima": "12/02/2027", "reservas": []}, {"sku": "PA008", "nome": "GRANOLA TIA SONIA POTE 350G", "emb": "UN", "fisico": 10, "disponivel": 10, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 88, "validadeProxima": "24/10/2026", "reservas": []}, {"sku": "PA419", "nome": "GRANOLA TIA SONIA POTE 350G CX 04 UND", "emb": "CB", "fisico": 12, "disponivel": 8, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 155, "validadeProxima": "30/12/2026", "reservas": [{"pedido": "RESERVA-PA419", "qtd": 3, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA419", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA174", "nome": "GRANOLA TIA SONIA POTE 350G CX 08 UND", "emb": "MC", "fisico": 22, "disponivel": 8, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 127, "validadeProxima": "02/12/2026", "reservas": [{"pedido": "RESERVA-PA174", "qtd": 12, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA174", "qtd": 2, "tipo": "Pedido"}]}, {"sku": "PA054", "nome": "GRANOLA TIA SONIA POTE 350G CX 15 UND", "emb": "CX", "fisico": 32, "disponivel": 23, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 133, "validadeProxima": "08/12/2026", "reservas": [{"pedido": "PEDIDO-PA054", "qtd": 9, "tipo": "Pedido"}]}, {"sku": "PA311", "nome": "GRANOLA TIA SONIA PREMIUM 200G", "emb": "UN", "fisico": 1, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 165, "validadeProxima": "09/01/2027", "reservas": []}, {"sku": "PA410", "nome": "GRANOLA TIA SONIA PREMIUM 200G CX 08 UND", "emb": "CB", "fisico": 19, "disponivel": 11, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 200, "validadeProxima": "13/02/2027", "reservas": [{"pedido": "RESERVA-PA410", "qtd": 8, "tipo": "Reserva"}]}, {"sku": "PA312", "nome": "GRANOLA TIA SONIA PREMIUM 200G CX 30UND", "emb": "CX", "fisico": 4, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 165, "validadeProxima": "09/01/2027", "reservas": [{"pedido": "PEDIDO-PA312", "qtd": 2, "tipo": "Pedido"}]}, {"sku": "PA316", "nome": "GRANOLA TIA SONIA SEM GLUTEN 180G", "emb": "UN", "fisico": 68, "disponivel": 38, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 134, "validadeProxima": "09/12/2026", "reservas": [{"pedido": "RESERVA-PA316", "qtd": 30, "tipo": "Reserva"}]}, {"sku": "PA411", "nome": "GRANOLA TIA SONIA SEM GLUTEN 180G CX 08 UND", "emb": "CB", "fisico": 32, "disponivel": 21, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 162, "validadeProxima": "06/01/2027", "reservas": [{"pedido": "RESERVA-PA411", "qtd": 9, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA411", "qtd": 2, "tipo": "Pedido"}]}, {"sku": "PA317", "nome": "GRANOLA TIA SONIA SEM GLUTEN 180G CX 30 UND", "emb": "CX", "fisico": 4, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 212, "validadeProxima": "25/02/2027", "reservas": []}, {"sku": "PA321", "nome": "GRANOLA TRADICIONAL 800G", "emb": "UN", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 103, "validadeProxima": "08/11/2026", "reservas": []}, {"sku": "PA322", "nome": "GRANOLA TRADICIONAL 800G CX 8 UND", "emb": "CX", "fisico": 141, "disponivel": 121, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 166, "validadeProxima": "10/01/2027", "reservas": [{"pedido": "RESERVA-PA322", "qtd": 20, "tipo": "Reserva"}]}, {"sku": "PA792", "nome": "GRANOLA TRADICIONAL TIA SONIA 120G", "emb": "UN", "fisico": 6, "disponivel": 6, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 191, "validadeProxima": "04/02/2027", "reservas": []}, {"sku": "PA812", "nome": "GRANOLA TRADICIONAL TIA SONIA 120G CX 20 UND", "emb": "MC", "fisico": 8, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 208, "validadeProxima": "21/02/2027", "reservas": [{"pedido": "RESERVA-PA812", "qtd": 6, "tipo": "Reserva"}]}, {"sku": "PA793", "nome": "GRANOLA TRADICIONAL TIA SONIA 120G CX 40 UND", "emb": "CX", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 208, "validadeProxima": "21/02/2027", "reservas": []}, {"sku": "PA939", "nome": "GRANOLA TRADICIONAL ZERO TIA SONIA 200G", "emb": "UN", "fisico": 11, "disponivel": 7, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 178, "validadeProxima": "22/01/2027", "reservas": [{"pedido": "RESERVA-PA939", "qtd": 4, "tipo": "Reserva"}]}, {"sku": "PA940", "nome": "GRANOLA TRADICIONAL ZERO TIA SONIA 200G CX 15 UND", "emb": "CX", "fisico": 11, "disponivel": -3, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 178, "validadeProxima": "22/01/2027", "reservas": [{"pedido": "RESERVA-PA940", "qtd": 11, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA940", "qtd": 3, "tipo": "Pedido"}]}, {"sku": "PA261", "nome": "GRANOLA X-PIN LIGHT 200G", "emb": "UN", "fisico": 5, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 157, "validadeProxima": "01/01/2027", "reservas": []}, {"sku": "PA414", "nome": "GRANOLA X-PIN LIGHT 200G CX 08 UND", "emb": "CB", "fisico": 32, "disponivel": 19, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 192, "validadeProxima": "05/02/2027", "reservas": [{"pedido": "RESERVA-PA414", "qtd": 12, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA414", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA262", "nome": "GRANOLA X-PIN LIGHT 200G CX 12 UND", "emb": "MC", "fisico": 67, "disponivel": 48, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 192, "validadeProxima": "05/02/2027", "reservas": [{"pedido": "RESERVA-PA262", "qtd": 18, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA262", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA263", "nome": "GRANOLA X-PIN LIGHT 200G CX 24 UND", "emb": "CX", "fisico": 60, "disponivel": 54, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 193, "validadeProxima": "06/02/2027", "reservas": [{"pedido": "RESERVA-PA263", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA263", "qtd": 5, "tipo": "Pedido"}]}, {"sku": "PA932", "nome": "MELADO DE CANA MINHA TIA 300G CX 10 UND", "emb": "CX", "fisico": 10, "disponivel": 10, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 201, "validadeProxima": "14/02/2027", "reservas": []}, {"sku": "PA710", "nome": "MIX DE CASTANHAS POTE 260G CX COM 08 UND", "emb": "CX", "fisico": 1, "disponivel": -4, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 148, "validadeProxima": "23/12/2026", "reservas": [{"pedido": "RESERVA-PA710", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA710", "qtd": 4, "tipo": "Pedido"}]}, {"sku": "PA118", "nome": "MIX DE CASTANHAS POTE 390G", "emb": "UN", "fisico": 5, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 106, "validadeProxima": "11/11/2026", "reservas": []}, {"sku": "PA176", "nome": "MIX DE CASTANHAS POTE 390G CX 08 UND", "emb": "MC", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 106, "validadeProxima": "11/11/2026", "reservas": []}, {"sku": "PA119", "nome": "MIX DE CASTANHAS POTE 390G CX 15 UND", "emb": "CX", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 148, "validadeProxima": "23/12/2026", "reservas": []}, {"sku": "PA389", "nome": "PASTA DE AMENDOIM POTE 260G CX 04 UND", "emb": "CB", "fisico": 1, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 111, "validadeProxima": "16/11/2026", "reservas": [{"pedido": "PEDIDO-PA389", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA292", "nome": "PASTA DE AMENDOIM POTE 260G CX 08 UND", "emb": "CX", "fisico": 5, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 111, "validadeProxima": "16/11/2026", "reservas": []}, {"sku": "RV0011", "nome": "PIPOCA CARAMELO COM FLOR DE SAL SINTA+ PACOTE 50G", "emb": "UN", "fisico": 36, "disponivel": 27, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 137, "validadeProxima": "12/12/2026", "reservas": [{"pedido": "PEDIDO-RV0011", "qtd": 9, "tipo": "Pedido"}]}, {"sku": "RV0036", "nome": "PIPOCA CARAMELO COM FLOR DE SAL SINTA+ PACOTE 50G CX 12UN.", "emb": "CX", "fisico": 34, "disponivel": 10, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 193, "validadeProxima": "06/02/2027", "reservas": [{"pedido": "RESERVA-RV0036", "qtd": 9, "tipo": "Reserva"}, {"pedido": "PEDIDO-RV0036", "qtd": 15, "tipo": "Pedido"}]}, {"sku": "RV0008", "nome": "PIPOCA CHIPS DE COCO SINTA+ PACOTE 50G", "emb": "UN", "fisico": 36, "disponivel": 27, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 137, "validadeProxima": "12/12/2026", "reservas": [{"pedido": "PEDIDO-RV0008", "qtd": 9, "tipo": "Pedido"}]}, {"sku": "RV0033", "nome": "PIPOCA CHIPS DE COCO SINTA+ PACOTE 50G CX 12UN", "emb": "CX", "fisico": 22, "disponivel": 17, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 171, "validadeProxima": "15/01/2027", "reservas": [{"pedido": "RESERVA-RV0033", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-RV0033", "qtd": 4, "tipo": "Pedido"}]}, {"sku": "RV0010", "nome": "PIPOCA CHOCOLATE SINTA+ PACOTE 50G", "emb": "UN", "fisico": 36, "disponivel": 27, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 137, "validadeProxima": "12/12/2026", "reservas": [{"pedido": "PEDIDO-RV0010", "qtd": 9, "tipo": "Pedido"}]}, {"sku": "RV0009", "nome": "PIPOCA LEITE EM PO SINTA+ PACOTE 50G", "emb": "UN", "fisico": 36, "disponivel": 27, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 137, "validadeProxima": "12/12/2026", "reservas": [{"pedido": "PEDIDO-RV0009", "qtd": 9, "tipo": "Pedido"}]}, {"sku": "RV0049", "nome": "PIPOCA SALGADA CURCUMA SINTA + PACOTE 50G CX 12UN.", "emb": "CX", "fisico": 5, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 171, "validadeProxima": "15/01/2027", "reservas": [{"pedido": "RESERVA-RV0049", "qtd": 2, "tipo": "Reserva"}]}, {"sku": "PA517", "nome": "PROTEIN BAR AMENDOIM DISPLAY 12X30G", "emb": "DS", "fisico": 9, "disponivel": 6, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 75, "validadeProxima": "11/10/2026", "reservas": [{"pedido": "RESERVA-PA517", "qtd": 3, "tipo": "Reserva"}]}, {"sku": "PA514", "nome": "PROTEIN BAR BANANA DISPLAY 12X30G", "emb": "DS", "fisico": 6, "disponivel": 0, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 125, "validadeProxima": "30/11/2026", "reservas": [{"pedido": "RESERVA-PA514", "qtd": 3, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA514", "qtd": 3, "tipo": "Pedido"}]}, {"sku": "PA520", "nome": "PROTEIN BAR CHOCOLATE COM NIBS DISPLAY 12X30G", "emb": "DS", "fisico": 8, "disponivel": 2, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 76, "validadeProxima": "12/10/2026", "reservas": [{"pedido": "RESERVA-PA520", "qtd": 3, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA520", "qtd": 3, "tipo": "Pedido"}]}, {"sku": "PA875", "nome": "SAL DO HIMALAIA MINHA TIA 200G CX 06 UND", "emb": "CB", "fisico": 5, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 295, "validadeProxima": "19/05/2027", "reservas": []}, {"sku": "PA876", "nome": "SAL DO HIMALAIA MINHA TIA 200G CX 12 UND", "emb": "MC", "fisico": 4, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 344, "validadeProxima": "07/07/2027", "reservas": [{"pedido": "RESERVA-PA876", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA877", "nome": "SAL DO HIMALAIA MINHA TIA 200G CX 24 UND", "emb": "CX", "fisico": 10, "disponivel": 10, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 297, "validadeProxima": "21/05/2027", "reservas": []}, {"sku": "PA928", "nome": "SEMENTE DE ABOBORA MINHA TIA 80G CX 08 UND", "emb": "CX", "fisico": 6, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 337, "validadeProxima": "30/06/2027", "reservas": [{"pedido": "RESERVA-PA928", "qtd": 3, "tipo": "Reserva"}]}, {"sku": "PA897", "nome": "SEMENTE DE CHIA MINHA TIA POTE 100G CX 04 UND", "emb": "MC", "fisico": 6, "disponivel": 5, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 333, "validadeProxima": "26/06/2027", "reservas": [{"pedido": "RESERVA-PA897", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA898", "nome": "SEMENTE DE CHIA MINHA TIA POTE 100G CX 08 UND", "emb": "CX", "fisico": 33, "disponivel": 31, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 333, "validadeProxima": "26/06/2027", "reservas": [{"pedido": "RESERVA-PA898", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA898", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA901", "nome": "SEMENTE DE CHIA MINHA TIA POUCH 100G", "emb": "UN", "fisico": 4, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 254, "validadeProxima": "08/04/2027", "reservas": []}, {"sku": "PA902", "nome": "SEMENTE DE CHIA MINHA TIA POUCH 100G CX 08 UND", "emb": "CX", "fisico": 14, "disponivel": 4, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 332, "validadeProxima": "25/06/2027", "reservas": [{"pedido": "RESERVA-PA902", "qtd": 10, "tipo": "Reserva"}]}, {"sku": "PA391", "nome": "SEMENTE DE CHIA TIA SONIA POTE 100G CX 04 UND", "emb": "CB", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 108, "validadeProxima": "13/11/2026", "reservas": []}, {"sku": "PA134", "nome": "SEMENTE DE CHIA TIA SONIA POTE 100G CX 08 UND", "emb": "CX", "fisico": 17, "disponivel": 17, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 171, "validadeProxima": "15/01/2027", "reservas": []}, {"sku": "PA904", "nome": "SEMENTE DE GIRASSOL MINHA TIA 80G CX 08 UND", "emb": "CX", "fisico": 9, "disponivel": 7, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 308, "validadeProxima": "01/06/2027", "reservas": [{"pedido": "RESERVA-PA904", "qtd": 2, "tipo": "Reserva"}]}, {"sku": "PA887", "nome": "SEMENTE DE LINHACA DOURADA MINHA TIA 200G", "emb": "UN", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 155, "validadeProxima": "30/12/2026", "reservas": []}, {"sku": "PA888", "nome": "SEMENTE DE LINHACA DOURADA MINHA TIA 200G CX 08 UND", "emb": "CB", "fisico": 12, "disponivel": 9, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 332, "validadeProxima": "25/06/2027", "reservas": [{"pedido": "RESERVA-PA888", "qtd": 3, "tipo": "Reserva"}]}, {"sku": "PA890", "nome": "SEMENTE DE LINHACA DOURADA MINHA TIA 200G CX 30 UND", "emb": "CX", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 302, "validadeProxima": "26/05/2027", "reservas": []}, {"sku": "PA036", "nome": "SEMENTE DE LINHACA MARROM 200G", "emb": "UN", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 126, "validadeProxima": "01/12/2026", "reservas": []}, {"sku": "PA387", "nome": "SEMENTE DE LINHACA MARROM 200G CX 08 UND", "emb": "CB", "fisico": 4, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 126, "validadeProxima": "01/12/2026", "reservas": [{"pedido": "PEDIDO-PA387", "qtd": 1, "tipo": "Pedido"}]}, {"sku": "PA180", "nome": "SEMENTE DE LINHACA MARROM 200G CX 15 UNID", "emb": "MC", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 126, "validadeProxima": "01/12/2026", "reservas": []}, {"sku": "PA914", "nome": "SEMENTE DE LINHACA MARROM MINHA TIA 200G", "emb": "UN", "fisico": 4, "disponivel": 4, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 80, "validadeProxima": "16/10/2026", "reservas": []}, {"sku": "PA915", "nome": "SEMENTE DE LINHACA MARROM MINHA TIA 200G CX 08 UND", "emb": "CB", "fisico": 8, "disponivel": 6, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 301, "validadeProxima": "25/05/2027", "reservas": [{"pedido": "RESERVA-PA915", "qtd": 2, "tipo": "Reserva"}]}, {"sku": "PA917", "nome": "SEMENTE DE LINHACA MARROM MINHA TIA 200G CX 30 UND", "emb": "CX", "fisico": 6, "disponivel": 6, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 220, "validadeProxima": "05/03/2027", "reservas": []}, {"sku": "PA821", "nome": "SNACK MIX DE CASTANHAS NUTS E FRUTAS 120G CX 08 UND", "emb": "MC", "fisico": 1, "disponivel": -4, "critico": true, "temRuptura": true, "temRiscoValidade": false, "tipoCritico": "ruptura", "diasParaVencer": 153, "validadeProxima": "28/12/2026", "reservas": [{"pedido": "RESERVA-PA821", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA821", "qtd": 4, "tipo": "Pedido"}]}, {"sku": "PA182", "nome": "SNACK MIX DE CASTANHAS NUTS E FRUTAS 120G CX 15 UND", "emb": "CX", "fisico": 4, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 124, "validadeProxima": "29/11/2026", "reservas": [{"pedido": "RESERVA-PA182", "qtd": 1, "tipo": "Reserva"}, {"pedido": "PEDIDO-PA182", "qtd": 2, "tipo": "Pedido"}]}, {"sku": "PA499", "nome": "SNACK NUTS TEMPERADO 25G DISPLAY 10 UND", "emb": "DS", "fisico": 3, "disponivel": 3, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 124, "validadeProxima": "29/11/2026", "reservas": []}, {"sku": "PA384", "nome": "TAPIOCA CROCANTE 180G", "emb": "UN", "fisico": 10, "disponivel": 2, "critico": true, "temRuptura": false, "temRiscoValidade": true, "tipoCritico": "validade", "diasParaVencer": 71, "validadeProxima": "07/10/2026", "reservas": [{"pedido": "PEDIDO-PA384", "qtd": 8, "tipo": "Pedido"}]}, {"sku": "PA386", "nome": "TAPIOCA CROCANTE 180G CX 15 UND", "emb": "MC", "fisico": 10, "disponivel": 9, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 117, "validadeProxima": "22/11/2026", "reservas": [{"pedido": "RESERVA-PA386", "qtd": 1, "tipo": "Reserva"}]}, {"sku": "PA385", "nome": "TAPIOCA CROCANTE 180G CX 30 UND", "emb": "CX", "fisico": 4, "disponivel": 1, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 117, "validadeProxima": "22/11/2026", "reservas": [{"pedido": "RESERVA-PA385", "qtd": 3, "tipo": "Reserva"}]}, {"sku": "PA121", "nome": "TAPIOCA CROCANTE POTE 290G CX 15 UNID", "emb": "CX", "fisico": 2, "disponivel": 2, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 148, "validadeProxima": "23/12/2026", "reservas": []}, {"sku": "PA879", "nome": "TAPIOCA GRANULADA MINHA TIA 500G CX 15 UND", "emb": "CX", "fisico": 23, "disponivel": 20, "critico": false, "temRuptura": false, "temRiscoValidade": false, "tipoCritico": "", "diasParaVencer": 147, "validadeProxima": "22/12/2026", "reservas": [{"pedido": "RESERVA-PA879", "qtd": 3, "tipo": "Reserva"}]}];
+
+        // 2. Saneamento de Dados
+        // Regra: Saldo Físico deve ser MAIOR QUE ZERO (exclui negativos e zerados) e menor que 100.000.
+        // Motivo: a finalidade do painel é sinalizar o que AINDA TEMOS fisicamente em estoque —
+        // um SKU com Físico zerado ou negativo não representa estoque real, é ruído.
+        // Obs: "Disponível" negativo/zerado NÃO é filtrado aqui de propósito — são exatamente
+        // as Rupturas Ocultas (ex: PA940 com Disponível -3), que é o alerta central do projeto.
+        // Tirar esses da lista removeria a própria razão de existir do dashboard.
+        let dadosEstoqueLimpos = dadosEstoqueBrutos.filter(item => item.fisico > 0 && item.fisico < 100000);
+
+        let graficoAtual = null;
+
+        function ordenarPorCriticidade(lista) {
+            return lista.slice().sort((a, b) => {
+                // Ranking por Validade (mais próxima primeiro) e Quantidade (maior primeiro).
+                // Itens sem lote cadastrado (diasParaVencer = null) vão para o final.
+                if (a.diasParaVencer === null && b.diasParaVencer === null) {
+                    return b.fisico - a.fisico;
+                }
+                if (a.diasParaVencer === null) return 1;
+                if (b.diasParaVencer === null) return -1;
+                if (a.diasParaVencer !== b.diasParaVencer) {
+                    return a.diasParaVencer - b.diasParaVencer;
+                }
+                return b.fisico - a.fisico;
+            });
+        }
+
+        function recalcularKPIs() {
+            const rupturas = dadosEstoqueLimpos.filter(i => i.tipoCritico === 'ruptura').length;
+            const validade = dadosEstoqueLimpos.filter(i => i.tipoCritico === 'validade').length;
+            const volume = dadosEstoqueLimpos.reduce((acc, i) => acc + i.fisico, 0);
+            document.getElementById('kpiRupturas').innerText = rupturas;
+            document.getElementById('kpiValidade').innerText = validade;
+            document.getElementById('kpiVolume').innerText = volume.toLocaleString('pt-BR');
+            document.getElementById('badgeRupturas').innerText = rupturas;
+            document.getElementById('badgeValidade').innerText = validade;
+
+            // Produto com vencimento mais próximo (considerando só quem tem lote cadastrado)
+            const comValidade = dadosEstoqueLimpos.filter(i => i.diasParaVencer !== null);
+            if (comValidade.length > 0) {
+                const maisProximo = comValidade.reduce((a, b) => a.diasParaVencer < b.diasParaVencer ? a : b);
+                document.getElementById('kpiDiasVencer').innerText = maisProximo.diasParaVencer;
+                document.getElementById('kpiSkuVencer').innerText = `${maisProximo.sku} — ${maisProximo.nome} (${maisProximo.validadeProxima})`;
+            } else {
+                document.getElementById('kpiDiasVencer').innerText = '—';
+                document.getElementById('kpiSkuVencer').innerText = 'Nenhum lote cadastrado';
+            }
+        }
+
+        // 3. Função para desenhar a tabela com base nos filtros e na busca
+        function aplicarFiltros() {
+            const termoBusca = document.getElementById('buscaTexto').value.toLowerCase();
+            const filtroEmb = document.getElementById('filtroEmb').value;
+            const apenasCriticos = document.getElementById('filtroCritico').checked;
+            const corpoTabela = document.getElementById('corpoTabela');
+
+            corpoTabela.innerHTML = '';
+
+            const dadosFiltrados = ordenarPorCriticidade(
+                dadosEstoqueLimpos.filter(item => {
+                    const passaBusca = item.sku.toLowerCase().includes(termoBusca) || item.nome.toLowerCase().includes(termoBusca);
+                    const passaFiltroEmb = (filtroEmb === 'TODAS') || (item.emb === filtroEmb);
+                    const passaFiltroCritico = apenasCriticos ? item.critico : true;
+                    return passaBusca && passaFiltroEmb && passaFiltroCritico;
+                })
+            );
+
+            if (dadosFiltrados.length === 0) {
+                corpoTabela.innerHTML = `<tr><td colspan="6" class="px-6 py-8 text-center text-gray-500">Nenhum produto encontrado.</td></tr>`;
+                console.log(`Teste OK: Filtro aplicado (busca="${termoBusca}", emb="${filtroEmb}", apenasCriticos=${apenasCriticos}) — 0 resultados`);
+                return;
+            }
+
+            dadosFiltrados.forEach(item => {
+                let linhaClass = '';
+                let botaoStatus = '';
+
+                if (item.tipoCritico === 'ruptura') {
+                    linhaClass = 'bg-red-50';
+                    botaoStatus = `<button onclick="abrirModal('${item.sku}')" class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1 px-3 rounded shadow">Auditar Ruptura</button>`;
+                } else if (item.tipoCritico === 'validade') {
+                    linhaClass = 'bg-yellow-50';
+                    botaoStatus = `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Risco Validade</span>`;
+                } else {
+                    botaoStatus = `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Normal</span>`;
+                }
+
+                const linha = `
+                    <tr class="${linhaClass}">
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-bold text-gray-900">${item.sku}</div>
+                            <div class="text-xs text-gray-500 w-48 truncate" title="${item.nome}">${item.nome}</div>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center">
+                            <span class="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-1 rounded">${item.emb}</span>
+                        </td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center text-sm font-medium ${item.critico ? 'text-gray-900' : 'text-gray-700'}">${item.fisico}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center text-sm font-bold ${item.disponivel <= 0 ? 'text-red-600' : 'text-green-600'}">${item.disponivel}</td>
+                        <td class="px-4 py-4 whitespace-nowrap text-center text-sm ${item.diasParaVencer === null ? 'text-gray-400' : item.tipoCritico === 'validade' ? 'font-bold text-yellow-700' : 'text-gray-600'}">
+                            ${item.diasParaVencer === null ? '—' : item.diasParaVencer + ' dias'}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            ${botaoStatus}
+                        </td>
+                    </tr>
+                `;
+                corpoTabela.innerHTML += linha;
+            });
+            console.log(`Teste OK: Filtro aplicado (busca="${termoBusca}", emb="${filtroEmb}", apenasCriticos=${apenasCriticos}) — ${dadosFiltrados.length} resultado(s)`);
+        }
+
+        // 4. Modal de Auditoria — funcional: libera reservas reais (Reserva/Empenho/Pedido) e recalcula saldo
+        function abrirModal(sku) {
+            const item = dadosEstoqueLimpos.find(i => i.sku === sku);
+            const infoValidade = item.diasParaVencer !== null ? ` · Vence em ${item.diasParaVencer} dias (${item.validadeProxima})` : '';
+            document.getElementById('modalTitulo').innerText = `Detalhes da Reserva: ${sku} — ${item.nome}${infoValidade}`;
+            const corpoModal = document.getElementById('corpoModal');
+            corpoModal.innerHTML = '';
+
+            if (!item.reservas || item.reservas.length === 0) {
+                corpoModal.innerHTML = `<tr><td colspan="3" class="px-4 py-4 text-center text-gray-500 text-sm">Nenhuma reserva bloqueando este SKU.</td></tr>`;
+            } else {
+                item.reservas.forEach((r, idx) => {
+                    corpoModal.innerHTML += `
+                        <tr>
+                            <td class="px-4 py-3 font-medium text-red-600">${r.tipo}</td>
+                            <td class="px-4 py-3 text-center font-bold">${r.qtd} un.</td>
+                            <td class="px-4 py-3 text-center">
+                                <button onclick="liberarSaldo('${sku}', ${idx})" class="bg-[#004797] hover:bg-[#003370] text-white text-xs font-bold py-1 px-3 rounded shadow">Liberar Saldo</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+            document.getElementById('modalAuditoria').classList.remove('hidden');
+            console.log(`Teste OK: Modal de auditoria aberto — SKU ${sku}, ${item.reservas.length} reserva(s) bloqueando o saldo`);
+        }
+
+        function liberarSaldo(sku, idxReserva) {
+            const item = dadosEstoqueLimpos.find(i => i.sku === sku);
+            const reserva = item.reservas[idxReserva];
+            if (!confirm(`Confirmar liberação de ${reserva.qtd} un. — ${reserva.tipo} do SKU ${sku}?`)) {
+                console.log(`Teste OK: Liberação de saldo cancelada pelo usuário — SKU ${sku}`);
+                return;
+            }
+
+            item.disponivel += reserva.qtd;
+            item.reservas.splice(idxReserva, 1);
+
+            if (item.tipoCritico === 'ruptura' && item.disponivel > 0) {
+                item.temRuptura = false;
+                item.tipoCritico = item.temRiscoValidade ? 'validade' : '';
+                item.critico = item.temRiscoValidade;
+            }
+
+            aplicarFiltros();
+            recalcularKPIs();
+            atualizarGrafico();
+
+            console.log(`Teste OK: Saldo liberado — SKU ${sku}, +${reserva.qtd} un. (${reserva.tipo}), novo disponível: ${item.disponivel}`);
+
+            if (item.reservas.length === 0) {
+                fecharModal();
+            } else {
+                abrirModal(sku);
+            }
+        }
+
+        function fecharModal() {
+            document.getElementById('modalAuditoria').classList.add('hidden');
+            console.log('Teste OK: Modal de auditoria fechado');
+        }
+
+        // 5. Exportação CSV real, respeitando busca + filtros ativos no momento do clique
+        function exportarCSV() {
+            console.log('Teste OK: Botão "Exportar para Comercial (CSV)" clicado');
+            const termoBusca = document.getElementById('buscaTexto').value.toLowerCase();
+            const filtroEmb = document.getElementById('filtroEmb').value;
+            const apenasCriticos = document.getElementById('filtroCritico').checked;
+
+            const dadosFiltrados = ordenarPorCriticidade(
+                dadosEstoqueLimpos.filter(item => {
+                    const passaBusca = item.sku.toLowerCase().includes(termoBusca) || item.nome.toLowerCase().includes(termoBusca);
+                    const passaFiltroEmb = (filtroEmb === 'TODAS') || (item.emb === filtroEmb);
+                    const passaFiltroCritico = apenasCriticos ? item.critico : true;
+                    return passaBusca && passaFiltroEmb && passaFiltroCritico;
+                })
+            );
+
+            const cabecalho = ['SKU', 'Produto', 'Embalagem', 'Saldo Fisico', 'Saldo Disponivel', 'Dias para Vencer', 'Status'];
+            const linhas = dadosFiltrados.map(item => {
+                const status = item.tipoCritico === 'ruptura' ? 'Ruptura'
+                    : item.tipoCritico === 'validade' ? 'Risco de Validade'
+                    : 'Normal';
+                const diasVencer = item.diasParaVencer === null ? 'N/D' : item.diasParaVencer;
+                return [item.sku, item.nome.replace(/;/g, ','), item.emb, item.fisico, item.disponivel, diasVencer, status].join(';');
+            });
+
+            const conteudoCSV = [cabecalho.join(';'), ...linhas].join('\n');
+            const blob = new Blob(['\uFEFF' + conteudoCSV], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `radar-zero-perda-export-${new Date().toISOString().slice(0,10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            console.log(`Teste OK: CSV exportado — ${dadosFiltrados.length} linha(s), arquivo radar-zero-perda-export-${new Date().toISOString().slice(0,10)}.csv`);
+        }
+
+        // 6. Gráfico Disponível x Retido (Curva A) — Top 5, barras horizontais
+        function atualizarGrafico() {
+            const TOP_N = 5;
+            const curvaA = ordenarPorCriticidade(dadosEstoqueLimpos).slice(0, TOP_N);
+
+            const labels = curvaA.map(i => i.sku);
+            const livre = curvaA.map(i => i.disponivel);
+            const retido = curvaA.map(i => i.fisico - i.disponivel);
+
+            if (graficoAtual) graficoAtual.destroy();
+            const ctx = document.getElementById('graficoTopEstoque').getContext('2d');
+            graficoAtual = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Livre', data: livre, backgroundColor: 'rgba(0, 71, 151, 0.9)', borderRadius: 4, barPercentage: 0.7 },
+                        { label: 'Retido', data: retido, backgroundColor: 'rgba(239, 68, 68, 0.9)', borderRadius: 4, barPercentage: 0.7 }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                        tooltip: {
+                            callbacks: {
+                                afterTitle: (items) => {
+                                    const item = curvaA[items[0].dataIndex];
+                                    return item.nome;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true, ticks: { font: { size: 10 } } },
+                        y: { stacked: true, ticks: { font: { size: 11, weight: 'bold' } } }
+                    }
+                }
+            });
+        }
+
+        // ============================================================
+        // 7. IMPORTAÇÃO DINÂMICA DA PLANILHA DO ERP (SheetJS)
+        // Replica a mesma lógica de cruzamento usada para gerar os dados originais:
+        // aba "1-ESTOQUE" (saldo/reservas por SKU) + aba "2-LOTES" (validade por lote,
+        // pode ter várias linhas por SKU — usamos sempre o lote com validade mais próxima).
+        // "Risco de Validade" = lote mais próximo vence em até 95 dias da data de sincronização.
+        // A "data de referência" para o cálculo de dias-a-vencer é a data embutida no nome
+        // do arquivo (ex: ..._28-07-26.xlsx = 28/07/2026), pois a planilha é uma FOTO do
+        // estoque naquele momento. Se não achar a data no nome, usa a data de hoje.
+        // ============================================================
+
+        const LIMIAR_RISCO_VALIDADE_DIAS = 95;
+
+        function extrairDataReferencia(nomeArquivo) {
+            const m = nomeArquivo.match(/(\d{2})-(\d{2})-(\d{2})(?:\.xlsx?|\.xls)?$/i);
+            if (m) {
+                const [, dd, mm, aa] = m;
+                return new Date(2000 + parseInt(aa, 10), parseInt(mm, 10) - 1, parseInt(dd, 10));
+            }
+            const hoje = new Date();
+            return new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+        }
+
+        function formatarDataBR(d) {
+            const dd = String(d.getDate()).padStart(2, '0');
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            return `${dd}/${mm}/${d.getFullYear()}`;
+        }
+
+        // Acha a linha de cabeçalho real dentro de uma matriz bruta (a planilha tem uma
+        // linha de título mesclada antes do cabeçalho de colunas de verdade).
+        function acharLinhaCabecalho(matriz, colunaChave) {
+            for (let i = 0; i < Math.min(matriz.length, 5); i++) {
+                if (matriz[i].some(cel => String(cel).trim().toLowerCase() === colunaChave.toLowerCase())) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        function linhasParaObjetos(matriz, idxCabecalho) {
+            const cabecalho = matriz[idxCabecalho].map(c => String(c).trim());
+            const linhas = [];
+            for (let i = idxCabecalho + 1; i < matriz.length; i++) {
+                const linha = matriz[i];
+                if (!linha || linha.every(c => c === undefined || c === '')) continue;
+                const obj = {};
+                cabecalho.forEach((nomeCol, idx) => { obj[nomeCol] = linha[idx]; });
+                linhas.push(obj);
+            }
+            return linhas;
+        }
+
+        function acharAba(workbook, palavraChave) {
+            return workbook.SheetNames.find(n => n.toLowerCase().includes(palavraChave.toLowerCase()));
+        }
+
+        function paraNumero(v) {
+            const n = parseFloat(v);
+            return isNaN(n) ? 0 : n;
+        }
+
+        async function importarPlanilhaERP(file) {
+            if (!file) return;
+            console.log(`Teste OK: Botão "Importar Planilha do ERP" clicado — arquivo selecionado: ${file.name}`);
+            prepararAudioAlerta(); // tem que ser aqui, antes de qualquer 'await', ou o navegador bloqueia o áudio
+            const inputEl = document.getElementById('inputPlanilhaERP');
+            const badgeStatus = document.getElementById('badgeStatusAnalise');
+            const statusOriginal = badgeStatus.innerHTML;
+            badgeStatus.innerHTML = '<span class="w-2 h-2 bg-yellow-500 rounded-full mr-2 animate-pulse"></span> Importando planilha...';
+            badgeStatus.className = 'text-sm font-medium text-yellow-700 bg-yellow-100 px-3 py-1 rounded-full flex items-center';
+
+            try {
+                const buffer = await file.arrayBuffer();
+                const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+
+                const nomeAbaEstoque = acharAba(workbook, 'ESTOQUE');
+                const nomeAbaLotes = acharAba(workbook, 'LOTE');
+                if (!nomeAbaEstoque || !nomeAbaLotes) {
+                    throw new Error('Não encontrei as abas "1-ESTOQUE" e "2-LOTES" nesse arquivo. Confirme se é a planilha exportada do ERP no formato esperado.');
+                }
+
+                const matrizEstoque = XLSX.utils.sheet_to_json(workbook.Sheets[nomeAbaEstoque], { header: 1, raw: true });
+                const matrizLotes = XLSX.utils.sheet_to_json(workbook.Sheets[nomeAbaLotes], { header: 1, raw: true });
+
+                const idxCabEstoque = acharLinhaCabecalho(matrizEstoque, 'Código');
+                const idxCabLotes = acharLinhaCabecalho(matrizLotes, 'Código');
+                if (idxCabEstoque === -1 || idxCabLotes === -1) {
+                    throw new Error('Não encontrei a coluna "Código" nas abas. A estrutura da planilha pode ter mudado — confira os cabeçalhos.');
+                }
+
+                const linhasEstoque = linhasParaObjetos(matrizEstoque, idxCabEstoque);
+                const linhasLotes = linhasParaObjetos(matrizLotes, idxCabLotes);
+
+                const colunasEstoqueEsperadas = ['Código', 'Descrição', 'Emb.', 'Qtde.', 'Reserva', 'Empenho', 'Pedido', 'Disponível'];
+                const faltandoEstoque = colunasEstoqueEsperadas.filter(c => !(c in linhasEstoque[0]));
+                if (faltandoEstoque.length > 0) {
+                    throw new Error(`Faltam colunas na aba de estoque: ${faltandoEstoque.join(', ')}.`);
+                }
+                const colunasLotesEsperadas = ['Código', 'VALIDADE'];
+                const faltandoLotes = colunasLotesEsperadas.filter(c => !(c in linhasLotes[0]));
+                if (faltandoLotes.length > 0) {
+                    throw new Error(`Faltam colunas na aba de lotes: ${faltandoLotes.join(', ')}.`);
+                }
+
+                const dataReferencia = extrairDataReferencia(file.name);
+
+                // Para cada SKU, acha o lote com validade mais próxima (a partir de hoje/referência)
+                const loteMaisProximoPorSku = {};
+                linhasLotes.forEach(l => {
+                    const sku = String(l['Código'] || '').trim();
+                    if (!sku) return;
+                    const validade = l['VALIDADE'] instanceof Date ? l['VALIDADE'] : new Date(l['VALIDADE']);
+                    if (isNaN(validade.getTime())) return;
+                    const diasParaVencer = Math.round((validade - dataReferencia) / 86400000);
+                    if (!(sku in loteMaisProximoPorSku) || diasParaVencer < loteMaisProximoPorSku[sku].diasParaVencer) {
+                        loteMaisProximoPorSku[sku] = { diasParaVencer, validade };
+                    }
+                });
+
+                const novosDados = linhasEstoque
+                    .filter(l => String(l['Código'] || '').trim() !== '')
+                    .map(l => {
+                        const sku = String(l['Código']).trim();
+                        const nome = String(l['Descrição'] || '').trim();
+                        const emb = String(l['Emb.'] || '').trim();
+                        const fisico = paraNumero(l['Qtde.']);
+                        const disponivel = paraNumero(l['Disponível']);
+                        const reserva = paraNumero(l['Reserva']);
+                        const empenho = paraNumero(l['Empenho']);
+                        const pedido = paraNumero(l['Pedido']);
+
+                        const reservas = [];
+                        if (reserva > 0) reservas.push({ pedido: `RESERVA-${sku}`, qtd: reserva, tipo: 'Reserva' });
+                        if (empenho > 0) reservas.push({ pedido: `EMPENHO-${sku}`, qtd: empenho, tipo: 'Empenho' });
+                        if (pedido > 0) reservas.push({ pedido: `PEDIDO-${sku}`, qtd: pedido, tipo: 'Pedido' });
+
+                        const lote = loteMaisProximoPorSku[sku];
+                        const diasParaVencer = lote ? lote.diasParaVencer : null;
+                        const validadeProxima = lote ? formatarDataBR(lote.validade) : null;
+
+                        const temRuptura = disponivel <= 0;
+                        const temRiscoValidade = diasParaVencer !== null && diasParaVencer <= LIMIAR_RISCO_VALIDADE_DIAS;
+                        const tipoCritico = temRuptura ? 'ruptura' : (temRiscoValidade ? 'validade' : '');
+
+                        return {
+                            sku, nome, emb, fisico, disponivel,
+                            critico: temRuptura || temRiscoValidade,
+                            temRuptura, temRiscoValidade, tipoCritico,
+                            diasParaVencer, validadeProxima, reservas
+                        };
+                    });
+
+                if (novosDados.length === 0) {
+                    throw new Error('A planilha foi lida, mas nenhuma linha de produto válida foi encontrada.');
+                }
+
+                // Foto do estado crítico ANTES de trocar os dados (pra comparação do alerta)
+                const estadoAntesDaImportacao = snapshotCritico(dadosEstoqueLimpos);
+
+                // Só substitui os dados atuais depois que TUDO deu certo
+                dadosEstoqueBrutos = novosDados;
+                dadosEstoqueLimpos = dadosEstoqueBrutos.filter(item => item.fisico > 0 && item.fisico < 100000);
+
+                document.getElementById('infoSincronizacao').innerText =
+                    `Sincronizado: ${file.name} · ${dadosEstoqueLimpos.length} SKUs`;
+
+                aplicarFiltros();
+                recalcularKPIs();
+                atualizarGrafico();
+
+                const novosCriticos = detectarNovosCriticos(estadoAntesDaImportacao, dadosEstoqueLimpos);
+                exibirAlertaCriticos(novosCriticos);
+                estadoCriticoAnterior = snapshotCritico(dadosEstoqueLimpos);
+
+                // Persiste a planilha importada neste navegador, para que ao reabrir a página
+                // (fechar aba, F5, etc.) os dados mais recentes continuem aparecendo, em vez
+                // de voltar para o estado original embutido no arquivo.
+                try {
+                    localStorage.setItem('radarZeroPerda_dados', JSON.stringify(dadosEstoqueBrutos));
+                    localStorage.setItem('radarZeroPerda_infoSincronizacao', document.getElementById('infoSincronizacao').innerText);
+                    localStorage.setItem('radarZeroPerda_salvoEm', new Date().toISOString());
+                } catch (erroStorage) {
+                    console.warn('Não foi possível salvar a planilha localmente (localStorage indisponível ou cheio):', erroStorage);
+                }
+
+                badgeStatus.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span> Análise Concluída e Saneada';
+                badgeStatus.className = 'text-sm font-medium text-green-600 bg-green-100 px-3 py-1 rounded-full flex items-center';
+                console.log(`Teste OK: Planilha importada com sucesso — ${file.name}, ${dadosEstoqueLimpos.length} SKUs, ${novosCriticos.length} novo(s) crítico(s)`);
+            } catch (erro) {
+                console.error(erro);
+                console.log(`Teste FALHOU: Importação rejeitada — ${erro.message}`);
+                alert(`Não foi possível importar a planilha:\n\n${erro.message}`);
+                badgeStatus.innerHTML = statusOriginal;
+                badgeStatus.className = 'text-sm font-medium text-green-600 bg-green-100 px-3 py-1 rounded-full flex items-center';
+            } finally {
+                inputEl.value = '';
+            }
+        }
+
+        // ============================================================
+        // 8. ALERTA DE NOVOS SKUs CRÍTICOS (visual + sonoro)
+        // A cada importação de planilha, comparamos o estado "crítico" de cada SKU
+        // ANTES x DEPOIS. Um SKU "novo crítico" é aquele que virou ruptura ou risco
+        // de validade agora, mas não estava crítico na última leitura do dashboard.
+        // Isso avisa o usuário sobre pioras reais no estoque, sem precisar caçar
+        // manualmente linha por linha na tabela.
+        // ============================================================
+
+        let estadoCriticoAnterior = {};
+        let timeoutToastCritico = null;
+
+        function snapshotCritico(lista) {
+            const mapa = {};
+            lista.forEach(item => { mapa[item.sku] = { critico: item.critico, tipoCritico: item.tipoCritico }; });
+            return mapa;
+        }
+
+        function detectarNovosCriticos(estadoAntes, listaAtual) {
+            return listaAtual.filter(item => {
+                const antes = estadoAntes[item.sku];
+                const eraCritico = antes ? antes.critico : false;
+                return item.critico && !eraCritico;
+            });
+        }
+
+        let audioCtxAlerta = null;
+
+        // Cria/retoma o AudioContext. Precisa ser chamado o mais cedo possível dentro
+        // do handler de clique/seleção de arquivo — se só for criado depois de vários
+        // "await", o navegador considera que perdeu o "gesto do usuário" e o áudio
+        // fica mudo (suspenso) sem lançar nenhum erro visível.
+        function prepararAudioAlerta() {
+            try {
+                if (!audioCtxAlerta) {
+                    audioCtxAlerta = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtxAlerta.state === 'suspended') {
+                    audioCtxAlerta.resume();
+                }
+            } catch (e) {
+                console.warn('Não foi possível preparar o áudio de alerta:', e);
+            }
+        }
+
+        // Beep curto via Web Audio API — não depende de nenhum arquivo de áudio externo
+        function tocarAlertaSonoro() {
+            try {
+                if (!audioCtxAlerta) { prepararAudioAlerta(); }
+                const ctx = audioCtxAlerta;
+                if (!ctx) return;
+                if (ctx.state === 'suspended') { ctx.resume(); }
+                [880, 660].forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.15, ctx.currentTime + i * 0.18);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.18 + 0.16);
+                    osc.connect(gain).connect(ctx.destination);
+                    osc.start(ctx.currentTime + i * 0.18);
+                    osc.stop(ctx.currentTime + i * 0.18 + 0.16);
+                });
+            } catch (e) {
+                console.warn('Não foi possível tocar o alerta sonoro:', e);
+            }
+        }
+
+        function exibirAlertaCriticos(novosCriticos) {
+            if (novosCriticos.length === 0) return;
+
+            const rupturas = novosCriticos.filter(i => i.tipoCritico === 'ruptura').length;
+            const validade = novosCriticos.filter(i => i.tipoCritico === 'validade').length;
+
+            const partes = [];
+            if (rupturas > 0) partes.push(`${rupturas} em ruptura`);
+            if (validade > 0) partes.push(`${validade} em risco de validade`);
+
+            const nomesExemplo = novosCriticos.slice(0, 4).map(i => i.sku).join(', ');
+            const resto = novosCriticos.length > 4 ? ` +${novosCriticos.length - 4}` : '';
+
+            document.getElementById('toastCriticoTitulo').innerText =
+                `${novosCriticos.length} novo(s) SKU(s) crítico(s) desde a última leitura`;
+            document.getElementById('toastCriticoDetalhe').innerText =
+                `${partes.join(' · ')} — ${nomesExemplo}${resto}`;
+
+            const toast = document.getElementById('toastAlertaCritico');
+            toast.classList.remove('hidden');
+            tocarAlertaSonoro();
+
+            if (timeoutToastCritico) clearTimeout(timeoutToastCritico);
+            timeoutToastCritico = setTimeout(fecharToastCritico, 12000);
+
+            console.log(`Teste OK: Alerta de novos críticos disparado — ${novosCriticos.length} SKU(s): ${novosCriticos.map(i => i.sku).join(', ')}`);
+        }
+
+        function fecharToastCritico() {
+            document.getElementById('toastAlertaCritico').classList.add('hidden');
+            if (timeoutToastCritico) { clearTimeout(timeoutToastCritico); timeoutToastCritico = null; }
+        }
+
+        // Iniciar
+        window.onload = function() {
+            // Se existir uma planilha importada anteriormente salva neste navegador,
+            // ela substitui os dados originais embutidos no arquivo (mesma lógica de
+            // "foto mais recente do estoque" usada na importação).
+            try {
+                const dadosSalvos = localStorage.getItem('radarZeroPerda_dados');
+                const infoSalva = localStorage.getItem('radarZeroPerda_infoSincronizacao');
+                const salvoEm = localStorage.getItem('radarZeroPerda_salvoEm');
+                if (dadosSalvos) {
+                    dadosEstoqueBrutos = JSON.parse(dadosSalvos);
+                    dadosEstoqueLimpos = dadosEstoqueBrutos.filter(item => item.fisico > 0 && item.fisico < 100000);
+                    if (infoSalva) document.getElementById('infoSincronizacao').innerText = infoSalva;
+                    console.log(`Teste OK: Última planilha importada (salva em ${salvoEm}) foi restaurada deste navegador.`);
+                }
+            } catch (erroStorage) {
+                console.warn('Não foi possível ler a planilha salva localmente:', erroStorage);
+            }
+
+            aplicarFiltros();
+            recalcularKPIs();
+            atualizarGrafico();
+            estadoCriticoAnterior = snapshotCritico(dadosEstoqueLimpos);
+            console.log('Teste OK: Dashboard carregado —', dadosEstoqueLimpos.length, 'SKUs, estado crítico inicial capturado.');
+        };
+    </script>
+</body>
+</html>
